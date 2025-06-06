@@ -97,7 +97,7 @@ class WebViewUserAgent: NSObject, WebAuthUserAgent {
         self.configurationSubviews()
         webview.navigationDelegate = self
     }
-
+    
     private func setupWebViewWithHTTPS() {
         self.webview = WKWebView(frame: .zero)
         self.viewController.view = webview
@@ -135,12 +135,12 @@ class WebViewUserAgent: NSObject, WebAuthUserAgent {
 
     func finish(with result: WebAuthResult<Void>) {
         DispatchQueue.main.async { [weak webview, weak viewController, callback] in
-            webview?.removeFromSuperview()
             guard let presenting = viewController?.presentingViewController else {
                 let error = WebAuthError(code: .unknown("Cannot dismiss WKWebView"))
                 return callback(.failure(error))
             }
             presenting.dismiss(animated: true) {
+                webview?.removeFromSuperview()
                 callback(result)
             }
         }
