@@ -47,100 +47,55 @@
 /// ## See Also
 ///
 /// - [OAuth 2.0 Best Practices for Native Apps](https://auth0.com/blog/oauth-2-best-practices-for-native-apps)
-public extension WebAuthentication {
+public extension WebAuthentication
+{
 
-    static func webViewProvider(style: UIModalPresentationStyle = .fullScreen) -> WebAuthProvider {
+    static func webViewProvider(style: UIModalPresentationStyle = .fullScreen) -> WebAuthProvider
+    {
         return { url, callback  in
             let redirectURL = extractRedirectURL(from: url)!
 
-            return WebViewUserAgent(authorizeURL: url,
-                                    redirectURL: redirectURL,
-                                    modalPresentationStyle: style,
-                                    callback: callback)
+            return WebViewUserAgent(
+                authorizeURL: url,
+                redirectURL: redirectURL,
+                modalPresentationStyle: style,
+                callback: callback)
         }
     }
 
 }
 
 class WebViewUserAgent: NSObject, WebAuthUserAgent {
-
-    static let customSchemeRedirectionSuccessMessage = "com.auth0.webview.redirection_success"
-    static let customSchemeRedirectionFailureMessage = "com.auth0.webview.redirection_failure"
-    let defaultSchemesSupportedByWKWebview = ["https"]
-
-    let request: URLRequest
-    var webview: WKWebView!
-    let viewController: UIViewController
-    let redirectURL: URL
+    let controller: WebViewController
     let callback: WebAuthProviderCallback
 
-    init(authorizeURL: URL, redirectURL: URL, viewController: UIViewController = UIViewController(), modalPresentationStyle: UIModalPresentationStyle = .fullScreen, callback: @escaping WebAuthProviderCallback) {
-        self.request = URLRequest(url: authorizeURL)
-        self.redirectURL = redirectURL
+    init(
+        authorizeURL: URL,
+        redirectURL: URL,
+        modalPresentationStyle: UIModalPresentationStyle = .fullScreen,
+        callback: @escaping WebAuthProviderCallback)
+    {
+        
+        self.controller = WebViewController(
+            authorizeURL: authorizeURL,
+            redirectURL: redirectURL,
+            style: modalPresentationStyle)
         self.callback = callback
-        self.viewController = viewController
-        self.viewController.modalPresentationStyle = modalPresentationStyle
-
+        
         super.init()
-        if !defaultSchemesSupportedByWKWebview.contains(redirectURL.scheme!) {
-            self.setupWebViewWithCustomScheme()
-        } else {
-            self.setupWebViewWithHTTPS()
+
+        self.controller.finishHandler = { result in
+            self.finish(with: result)
         }
     }
 
-    private func setupWebViewWithCustomScheme() {
-        let configuration = WKWebViewConfiguration()
-        configuration.setURLSchemeHandler(self, forURLScheme: redirectURL.scheme!)
-        self.webview = WKWebView(frame: .zero, configuration: configuration)
-        self.viewController.view = webview
-        self.configurationSubviews()
-        webview.navigationDelegate = self
-    }
-    
-    private func setupWebViewWithHTTPS() {
-        self.webview = WKWebView(frame: .zero)
-        self.viewController.view = webview
-        self.configurationSubviews()
-        webview.navigationDelegate = self
-    }
-    
-    private func configurationSubviews()
-    {
-        let closeButton = UIButton(type: .system)
-        let config = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
-        let closeImage = UIImage(systemName: "xmark.circle.fill", withConfiguration: config)
-        closeButton.setImage(closeImage, for: .normal)
-        closeButton.tintColor = .white
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        self.viewController.view.addSubview(closeButton)
-        NSLayoutConstraint.activate([
-            closeButton.topAnchor.constraint(equalTo: self.viewController.view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            closeButton.trailingAnchor.constraint(equalTo: self.viewController.view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36)
-        ])
-        self.viewController.isModalInPresentation = true
-    }
-    
-    @objc private func closeTapped() {
-        self.finish(with: .failure(WebAuthError(code: .userCancelled)))
-    }
-
     func start() {
-        self.webview.load(self.request)
-        UIWindow.topViewController?.present(self.viewController, animated: true)
+        UIWindow.topViewController?.present(controller, animated: true)
     }
 
     func finish(with result: WebAuthResult<Void>) {
-        DispatchQueue.main.async { [weak webview, weak viewController, callback] in
-            guard let presenting = viewController?.presentingViewController else {
-                let error = WebAuthError(code: .unknown("Cannot dismiss WKWebView"))
-                return callback(.failure(error))
-            }
-            presenting.dismiss(animated: true) {
-                webview?.removeFromSuperview()
+        DispatchQueue.main.async { [unowned controller, callback] in
+            controller.dismiss(animated: true) {
                 callback(result)
             }
         }
@@ -152,57 +107,153 @@ class WebViewUserAgent: NSObject, WebAuthUserAgent {
 
 }
 
+final class WebViewController: UIViewController {
+    fileprivate static let customSchemeRedirectionSuccessMessage = "com.auth0.webview.redirection_success"
+    fileprivate static let customSchemeRedirectionFailureMessage = "com.auth0.webview.redirection_failure"
+    private let defaultSchemesSupportedByWKWebview = ["https"]
+    
+    private var webView: WKWebView?
+    private let request: URLRequest
+    private let redirectURL: URL
+    private var loadingIndicator: UIActivityIndicatorView?
+    
+    var finishHandler: ((WebAuthResult<Void>) -> Void)?
+    
+    init(
+        authorizeURL: URL,
+        redirectURL: URL,
+        style: UIModalPresentationStyle)
+    {
+        self.request = URLRequest(url: authorizeURL)
+        self.redirectURL = redirectURL
+        
+        super.init(nibName: nil, bundle: nil)
+        
+        self.modalPresentationStyle = style
+        
+        if !defaultSchemesSupportedByWKWebview.contains(redirectURL.scheme!) {
+            let configuration = WKWebViewConfiguration()
+            configuration.setURLSchemeHandler(self, forURLScheme: redirectURL.scheme!)
+            self.webView = WKWebView(frame: .zero, configuration: configuration)
+        } else {
+            self.webView = WKWebView(frame: .zero)
+        }
+        
+        self.view = webView
+        self.configurationSubviews()
+        self.webView?.navigationDelegate = self
+        self.isModalInPresentation = true
+        
+        self.webView?.load(self.request)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func configurationSubviews()
+    {
+        let closeButton = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
+        let closeImage = UIImage(systemName: "xmark.circle.fill", withConfiguration: config)
+        closeButton.setImage(closeImage, for: .normal)
+        closeButton.tintColor = .white
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        self.view.addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: self.view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalToConstant: 36)
+        ])
+        
+        // Setup loading indicator
+        loadingIndicator = UIActivityIndicatorView(style: .large)
+        loadingIndicator?.color = .gray
+        loadingIndicator?.translatesAutoresizingMaskIntoConstraints = false
+        if let loadingIndicator = loadingIndicator {
+            self.view.addSubview(loadingIndicator)
+            NSLayoutConstraint.activate([
+                loadingIndicator.centerXAnchor.constraint(equalTo: self.view.centerXAnchor),
+                loadingIndicator.centerYAnchor.constraint(equalTo: self.view.centerYAnchor)
+            ])
+        }
+    }
+    
+    @objc private func closeTapped() {
+        finishHandler?(.failure(WebAuthError(code: .userCancelled)))
+    }
+}
+
 /// Handling of Custom Scheme callbacks.
-extension WebViewUserAgent: WKURLSchemeHandler {
+extension WebViewController: WKURLSchemeHandler {
 
     func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
-        _ = TransactionStore.shared.resume(urlSchemeTask.request.url!)
-        let error = NSError(domain: WebViewUserAgent.customSchemeRedirectionSuccessMessage, code: 200, userInfo: [
+        guard let url = urlSchemeTask.request.url else {
+            return
+        }
+        
+        _ = TransactionStore.shared.resume(url)
+        
+        // Stop loading indicator when redirected back to the app
+        loadingIndicator?.stopAnimating()
+        
+        let error = NSError(domain: WebViewController.customSchemeRedirectionSuccessMessage, code: 200, userInfo: [
             NSLocalizedDescriptionKey: "WebViewProvider: WKURLSchemeHandler: Succesfully redirected back to the app"
         ])
+        
         urlSchemeTask.didFailWithError(error)
     }
 
     func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
-        let error = NSError(domain: WebViewUserAgent.customSchemeRedirectionFailureMessage, code: 400, userInfo: [
+        // Stop loading indicator when resource loading is stopped
+        loadingIndicator?.stopAnimating()
+        
+        let error = NSError(domain: WebViewController.customSchemeRedirectionFailureMessage, code: 400, userInfo: [
             NSLocalizedDescriptionKey: "WebViewProvider: WKURLSchemeHandler: Webview Resource Loading has been stopped"
         ])
         urlSchemeTask.didFailWithError(error)
-        self.finish(with: .failure(WebAuthError(code: .webViewFailure("The WebView's resource loading was stopped."))))
+        
+        finishHandler?(.failure(WebAuthError(code: .webViewFailure("The WebView's resource loading was stopped."))))
     }
-
 }
 
 /// Handling of HTTPS callbacks.
-extension WebViewUserAgent: WKNavigationDelegate {
+extension WebViewController: WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        // Show loading indicator when navigation starts
+        loadingIndicator?.startAnimating()
+        
         if let callbackUrl = navigationAction.request.url, callbackUrl.absoluteString.starts(with: redirectURL.absoluteString), let scheme = callbackUrl.scheme, scheme == "https" {
             _ = TransactionStore.shared.resume(callbackUrl)
+            loadingIndicator?.stopAnimating()
             decisionHandler(.cancel)
         } else {
             decisionHandler(.allow)
         }
     }
-
-    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
-        if (error as NSError).domain == WebViewUserAgent.customSchemeRedirectionSuccessMessage {
-            return
-        }
-        self.finish(with: .failure(WebAuthError(code: .webViewFailure("An error occurred during a committed main frame navigation of the WebView."), cause: error)))
+    
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        // Stop loading indicator when page finishes loading
+        loadingIndicator?.stopAnimating()
     }
-
-    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
-        if (error as NSError).domain == WebViewUserAgent.customSchemeRedirectionSuccessMessage {
-            return
-        }
-        self.finish(with: .failure(WebAuthError(code: .webViewFailure("An error occurred while starting to load data for the main frame of the WebView."), cause: error)))
+    
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        // Stop loading indicator when navigation fails
+        loadingIndicator?.stopAnimating()
     }
-
+    
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        // Stop loading indicator when provisional navigation fails
+        loadingIndicator?.stopAnimating()
+    }
+    
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        self.finish(with: .failure(WebAuthError(code: .webViewFailure("The WebView's content process was terminated."))))
+        // Stop loading indicator when content process terminates
+        loadingIndicator?.stopAnimating()
     }
-
 }
 
 #endif
