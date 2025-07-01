@@ -1,7 +1,7 @@
 # Change Log
 
-## [2.13.0](https://github.com/auth0/Auth0.swift/tree/2.13.0) (2025-05-30)
-[Full Changelog](https://github.com/auth0/Auth0.swift/compare/2.12.0...2.13.0)
+## [2.14.0](https://github.com/auth0/Auth0.swift/tree/2.14.0) (2025-05-30)
+[Full Changelog](https://github.com/auth0/Auth0.swift/compare/2.12.0...2.14.0)
 
 **Added**
 - Add support for enrolling passkeys with My Account API [SDK-5543] [\#962](https://github.com/auth0/Auth0.swift/pull/962) ([Widcket](https://github.com/Widcket))
