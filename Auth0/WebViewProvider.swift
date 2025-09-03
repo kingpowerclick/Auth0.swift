@@ -221,16 +221,31 @@ extension WebViewController: WKURLSchemeHandler {
 
 /// Handling of HTTPS callbacks.
 extension WebViewController: WKNavigationDelegate {
-
+    
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         // Show loading indicator when navigation starts
         loadingIndicator?.startAnimating()
         
-        if let callbackUrl = navigationAction.request.url, callbackUrl.absoluteString.starts(with: redirectURL.absoluteString), let scheme = callbackUrl.scheme, scheme == "https" {
+        if let callbackUrl = navigationAction.request.url,
+           callbackUrl.absoluteString.starts(with: redirectURL.absoluteString),
+           let scheme = callbackUrl.scheme,
+           scheme == "https"
+        {
             _ = TransactionStore.shared.resume(callbackUrl)
             loadingIndicator?.stopAnimating()
             decisionHandler(.cancel)
-        } else {
+        }
+        else
+        {
+            print("decidePolicyFor: \(navigationAction.request.url?.absoluteString ?? "")")
+            if navigationAction.targetFrame?.isMainFrame == true
+            {
+                print("→ Main frame navigation")
+            }
+            else
+            {
+                print("→ NOT main frame navigation")
+            }
             decisionHandler(.allow)
         }
     }
