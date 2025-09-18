@@ -228,8 +228,7 @@ extension WebViewController: WKNavigationDelegate {
         
         if let callbackUrl = navigationAction.request.url,
            callbackUrl.absoluteString.starts(with: redirectURL.absoluteString),
-           let scheme = callbackUrl.scheme,
-           scheme == "https"
+           let scheme = callbackUrl.scheme
         {
             _ = TransactionStore.shared.resume(callbackUrl)
             loadingIndicator?.stopAnimating()
