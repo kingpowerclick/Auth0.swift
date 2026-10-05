@@ -80,6 +80,8 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
     let callback: WebAuthProviderCallback
     @MainActor
     private weak var presentationWindow: Auth0WindowRepresentable?
+    @MainActor
+    private var loadingIndicator: UIActivityIndicatorView?
 
     @MainActor
     init(authorizeURL: URL,
@@ -109,6 +111,7 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
         configuration.setURLSchemeHandler(self, forURLScheme: redirectURL.scheme!)
         self.webview = WKWebView(frame: .zero, configuration: configuration)
         self.viewController.view = webview
+        self.configurationSubviews()
         webview.navigationDelegate = self
     }
 
@@ -116,7 +119,48 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
     private func setupWebViewWithHTTPS() {
         self.webview = WKWebView(frame: .zero)
         self.viewController.view = webview
+        self.configurationSubviews()
         webview.navigationDelegate = self
+    }
+
+    @MainActor
+    private func configurationSubviews() {
+        let view: UIView = self.viewController.view
+
+        let closeButton = UIButton(type: .system)
+        let config = UIImage.SymbolConfiguration(pointSize: 36, weight: .regular)
+        let closeImage = UIImage(systemName: "xmark.circle.fill", withConfiguration: config)
+        closeButton.setImage(closeImage, for: .normal)
+        closeButton.tintColor = .white
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(closeButton)
+        NSLayoutConstraint.activate([
+            closeButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            closeButton.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -8),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalToConstant: 36)
+        ])
+
+        let loadingIndicator = UIActivityIndicatorView(style: .large)
+        loadingIndicator.color = .gray
+        loadingIndicator.hidesWhenStopped = true
+        loadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(loadingIndicator)
+        NSLayoutConstraint.activate([
+            loadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor)
+        ])
+        self.loadingIndicator = loadingIndicator
+
+        // The close button is the only way to dismiss; disable swipe-to-dismiss
+        self.viewController.isModalInPresentation = true
+    }
+
+    @MainActor
+    @objc private func closeTapped() {
+        // Cancels the current transaction, which finishes this user agent with `.userCancelled`
+        TransactionStore.shared.cancel()
     }
 
     func start() {
@@ -152,12 +196,14 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
     
     @MainActor
     private func finishOnMain(with result: WebAuthResult<Void>) {
-        webview?.removeFromSuperview()
         guard let presenting = viewController.presentingViewController else {
+            webview?.removeFromSuperview()
             let error = WebAuthError(code: .unknown("Cannot dismiss WKWebView"))
             return callback(.failure(error))
         }
         presenting.dismiss(animated: true) {
+            // Remove the web view after the dismissal animation, to avoid a blank sheet while dismissing
+            self.webview?.removeFromSuperview()
             self.callback(result)
         }
     }
@@ -200,7 +246,16 @@ extension WebViewUserAgent: WKNavigationDelegate {
         return .allow
     }
 
+    func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        loadingIndicator?.startAnimating()
+    }
+
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        loadingIndicator?.stopAnimating()
+    }
+
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: any Error) {
+        loadingIndicator?.stopAnimating()
         if (error as NSError).domain == WebViewUserAgent.customSchemeRedirectionSuccessMessage {
             return
         }
@@ -208,6 +263,7 @@ extension WebViewUserAgent: WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: any Error) {
+        loadingIndicator?.stopAnimating()
         if (error as NSError).domain == WebViewUserAgent.customSchemeRedirectionSuccessMessage {
             return
         }
@@ -215,6 +271,7 @@ extension WebViewUserAgent: WKNavigationDelegate {
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        loadingIndicator?.stopAnimating()
         self.finish(with: .failure(WebAuthError(code: .webViewFailure("The WebView's content process was terminated."))))
     }
 
