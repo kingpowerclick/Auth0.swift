@@ -343,7 +343,49 @@ class WebViewProviderSpec: QuickSpec {
                     }
                 }
             }
+
+            it("should call the callback only once when the handled redirect navigation is interrupted") {
+                // Cancelling the navigation to the redirect URL makes WebKit report this error afterwards
+                let error = NSError(domain: "WebKitErrorDomain", code: 102, userInfo: [
+                    NSLocalizedDescriptionKey: "Frame load interrupted",
+                    NSURLErrorFailingURLErrorKey: redirectURL
+                ])
+                let callbackCounter = CallbackCounter()
+                waitUntil(timeout: LongerTimeout) { done in
+                    callback = { _ in callbackCounter.increment() }
+                    Task { @MainActor in
+                        webViewUserAgent = WebViewUserAgent(authorizeURL: logoutURL, redirectURL: redirectURL, viewController: mockViewController, callback: callback)
+                        TransactionStore.shared.store(LogoutTransaction(userAgent: webViewUserAgent))
+
+                        let navigationAction = MockWKNavigationAction(url: redirectURL)
+                        let policy = await webViewUserAgent.webView(mockWebView, decidePolicyFor: navigationAction)
+                        expect(policy).to(equal(.cancel))
+                        webViewUserAgent.webView(mockWebView, didFailProvisionalNavigation: nil, withError: error)
+
+                        try? await Task.sleep(nanoseconds: 1_500_000_000)
+                        expect(callbackCounter.count).to(equal(1))
+                        done()
+                    }
+                }
+            }
         }
+    }
+}
+
+final class CallbackCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func increment() {
+        lock.lock()
+        defer { lock.unlock() }
+        value += 1
     }
 }
 

@@ -82,6 +82,8 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
     private weak var presentationWindow: Auth0WindowRepresentable?
     @MainActor
     private var loadingIndicator: UIActivityIndicatorView?
+    @MainActor
+    private var isFinished = false
 
     @MainActor
     init(authorizeURL: URL,
@@ -196,6 +198,10 @@ final class WebViewUserAgent: NSObject, WebAuthUserAgent, Sendable {
     
     @MainActor
     private func finishOnMain(with result: WebAuthResult<Void>) {
+        // Cancelling the navigation to the redirect URL makes WebKit report a "Frame load interrupted" failure
+        // after the transaction has already finished this user agent, so only the first result is delivered
+        guard !isFinished else { return }
+        isFinished = true
         guard let presenting = viewController.presentingViewController else {
             webview?.removeFromSuperview()
             let error = WebAuthError(code: .unknown("Cannot dismiss WKWebView"))
